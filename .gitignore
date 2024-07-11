@@ -1,4 +1,5 @@
 .idea
 .code
+mr-tmp
 *.so
 mr-out-*

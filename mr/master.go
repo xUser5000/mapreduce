@@ -80,7 +80,7 @@ func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
 	if m.Phase == TaskTypeMap && finishedMaps == len(m.MapTasks) {
 		for i := range m.R {
 			input := make([]string, 0)
-			for j := range m.R {
+			for j := range m.M {
 				input = append(input, fmt.Sprintf("mr-%v-%v", j, i))
 			}
 

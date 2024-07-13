@@ -1,6 +1,14 @@
 package mr
 
-import "fmt"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"time"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
@@ -25,33 +33,91 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	// Your worker implementation here.
+	for {
+		task, err := getTask()
+		if err != nil {
+			fmt.Printf("Worker %v: exit due to unreachable master\n", os.Getpid())
+			os.Exit(0)
+		}
 
-	// uncomment to send the Example RPC to the master.
-	// CallExample()
+		fmt.Printf("Worker %v: executing %v\n", os.Getpid(), task)
 
+		if task.Type == TaskTypeMap {
+			mapper(mapf, task)
+		} else {
+			reducer(reducef, task)
+		}
+
+		fmt.Printf("Worker %v: finished %v\n", os.Getpid(), task)
+	}
 }
 
-// CallExample
-// example function to show how to make an RPC call to the master.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
+func mapper(mapf func(string, string) []KeyValue, task *Task) {
+	input, err := os.Open(task.Input)
+	if err != nil {
+		log.Fatalf("Worker: %v", err)
+	}
+	defer input.Close()
 
-	// declare an argument structure.
-	args := ExampleArgs{}
+	content, err := io.ReadAll(input)
+	if err != nil {
+		log.Fatalf("Worker: %v", err)
+	}
 
-	// fill in the argument(s).
-	args.X = 99
+	// run the user-defined map function
+	kva := mapf(input.Name(), string(content))
 
-	// declare a reply structure.
-	reply := ExampleReply{}
+	mapno := task.Handle
 
-	// send the RPC request, wait for the reply.
-	call("Master.Example", &args, &reply)
+	// open R reduce files
+	encoders := make([]*json.Encoder, 0)
+	for reduceno := range task.R {
+		name := fmt.Sprintf("mr-%v-%v", mapno, reduceno)
+		file, err := os.Create(name)
+		if err != nil {
+			log.Fatalf("mapper: %v", err)
+		}
+		defer file.Close()
 
-	// reply.Y should be 100.
-	fmt.Printf("reply.Y %v\n", reply.Y)
+		encoders = append(encoders, json.NewEncoder(file))
+	}
+
+	// partition the keys into R files
+	for _, p := range kva {
+		reduceno := ihash(p.Key) % task.R
+		err := encoders[reduceno].Encode(p)
+		if err != nil {
+			log.Fatalf("mapper: %v", err)
+		}
+	}
+
+	if err := finish(task); err != nil {
+		log.Fatalf("mapper: %v", err)
+	}
+}
+
+func reducer(reducef func(string, []string) string, task *Task) {
+	time.Sleep(time.Millisecond * 200)
+	finish(task)
+}
+
+func getTask() (*Task, error) {
+	args := GetTaskArgs{Worker: strconv.Itoa(os.Getpid())}
+	reply := Task{}
+	if !call("Master.GetTask", &args, &reply) {
+		return nil, errors.New("getTask(): something went wrong\n")
+	}
+	return &reply, nil
+}
+
+func finish(task *Task) error {
+	args := FinishArgs{Handle: task.Handle, Type: task.Type}
+	fmt.Println(args)
+	reply := FinishReply{}
+	if !call("Master.Finish", &args, &reply) {
+		return errors.New("finish(): something went wrong\n")
+	}
+	return nil
 }
 
 // send an RPC request to the master, wait for the response.

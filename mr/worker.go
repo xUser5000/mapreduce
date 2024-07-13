@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
-	"time"
 )
 import "log"
 import "net/rpc"
@@ -27,6 +27,14 @@ func ihash(key string) int {
 	h.Write([]byte(key))
 	return int(h.Sum32() & 0x7fffffff)
 }
+
+// ByKey for sorting by key.
+type ByKey []KeyValue
+
+// Len for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 // Worker
 // main/mrworker.go calls this function.
@@ -94,8 +102,58 @@ func mapper(mapf func(string, string) []KeyValue, task *Task) {
 }
 
 func reducer(reducef func(string, []string) string, task *Task) {
-	time.Sleep(time.Millisecond * 200)
-	finish(task)
+	intermediate := make([]KeyValue, 0)
+	for _, filename := range task.Input {
+		file, err := os.Open(filename)
+		if err != nil {
+			log.Fatalf("reducer: %v\n", err)
+		}
+
+		doc := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := doc.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate, kv)
+		}
+
+		file.Close()
+	}
+
+	sort.Sort(ByKey(intermediate))
+
+	ofile, err := os.Create(task.Output[0])
+	if err != nil {
+		log.Fatalf("reducer: %v\n", err)
+	}
+	defer ofile.Close()
+
+	l := 0
+	for l < len(intermediate) {
+		r := l + 1
+		for r < len(intermediate) && intermediate[r].Key == intermediate[l].Key {
+			r++
+		}
+
+		values := make([]string, 0)
+		for k := l; k < r; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[l].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		_, err := fmt.Fprintf(ofile, "%v %v\n", intermediate[l].Key, output)
+		if err != nil {
+			log.Fatalf("reducer: %v\n", err)
+		}
+
+		l = r
+	}
+
+	if err := finish(task); err != nil {
+		log.Fatalf("mapper: %v", err)
+	}
 }
 
 func getTask() (*Task, error) {

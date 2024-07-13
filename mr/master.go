@@ -121,7 +121,6 @@ func (m *Master) server() {
 // main/mrmaster.go calls Done() periodically to find out
 // if the entire job has finished.
 func (m *Master) Done() bool {
-	fmt.Println("master: Done()")
 	if m.Phase == TaskTypeReduce {
 		for _, task := range m.ReduceTasks {
 			if task.Status != TaskStatusFinished {

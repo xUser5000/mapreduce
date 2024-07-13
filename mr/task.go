@@ -1,13 +1,20 @@
 package mr
 
+import "fmt"
+
 type Task struct {
 	Handle int
 	R      int
+	M      int
 	Type   TaskType
-	Input  string
-	Output string
+	Input  []string
+	Output []string
 	Status TaskStatus
 	Worker string
+}
+
+func (task *Task) String() string {
+	return fmt.Sprintf("Task{ Type: %s, Handle: %v }", task.Type, task.Handle)
 }
 
 type TaskType int

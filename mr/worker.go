@@ -53,7 +53,7 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func mapper(mapf func(string, string) []KeyValue, task *Task) {
-	input, err := os.Open(task.Input)
+	input, err := os.Open(task.Input[0])
 	if err != nil {
 		log.Fatalf("Worker: %v", err)
 	}
@@ -67,19 +67,16 @@ func mapper(mapf func(string, string) []KeyValue, task *Task) {
 	// run the user-defined map function
 	kva := mapf(input.Name(), string(content))
 
-	mapno := task.Handle
-
 	// open R reduce files
 	encoders := make([]*json.Encoder, 0)
-	for reduceno := range task.R {
-		name := fmt.Sprintf("mr-%v-%v", mapno, reduceno)
-		file, err := os.Create(name)
+	for _, file := range task.Output {
+		output, err := os.Create(file)
 		if err != nil {
 			log.Fatalf("mapper: %v", err)
 		}
-		defer file.Close()
+		defer output.Close()
 
-		encoders = append(encoders, json.NewEncoder(file))
+		encoders = append(encoders, json.NewEncoder(output))
 	}
 
 	// partition the keys into R files
@@ -112,7 +109,6 @@ func getTask() (*Task, error) {
 
 func finish(task *Task) error {
 	args := FinishArgs{Handle: task.Handle, Type: task.Type}
-	fmt.Println(args)
 	reply := FinishReply{}
 	if !call("Master.Finish", &args, &reply) {
 		return errors.New("finish(): something went wrong\n")

@@ -12,10 +12,12 @@ import "net/rpc"
 import "net/http"
 
 type Master struct {
-	MapTasks         []Task
-	ReduceTasks      []Task
-	Phase            TaskType
-	ReduceTasksCount int
+	MapTasks    []Task
+	ReduceTasks []Task
+	Phase       TaskType
+	R           int
+	M           int
+	TaskCounter int
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -59,7 +61,6 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *Task) error {
 }
 
 func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
-	fmt.Println(args)
 	var task *Task
 	if args.Type == TaskTypeMap {
 		task = &m.MapTasks[args.Handle]
@@ -77,13 +78,20 @@ func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
 	}
 
 	if m.Phase == TaskTypeMap && finishedMaps == len(m.MapTasks) {
-		for i := range m.ReduceTasksCount {
+		for i := range m.R {
+			input := make([]string, 0)
+			for j := range m.R {
+				input = append(input, fmt.Sprintf("mr-%v-%v", j, i))
+			}
+
+			output := []string{fmt.Sprintf("mr-out-%v", i)}
+
 			reduceTask := Task{
 				Handle: i,
-				R:      m.ReduceTasksCount,
+				R:      m.R,
 				Type:   TaskTypeReduce,
-				Input:  "",
-				Output: "",
+				Input:  input,
+				Output: output,
 				Status: TaskStatusReady,
 				Worker: "",
 			}
@@ -131,19 +139,26 @@ func (m *Master) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{
-		Phase:            TaskTypeMap,
-		MapTasks:         make([]Task, 0),
-		ReduceTasks:      make([]Task, 0),
-		ReduceTasksCount: nReduce,
+		Phase:       TaskTypeMap,
+		MapTasks:    make([]Task, 0),
+		ReduceTasks: make([]Task, 0),
+		R:           nReduce,
+		M:           len(files),
+		TaskCounter: 0,
 	}
 
 	for i, file := range files {
+		output := make([]string, 0)
+		for j := range m.R {
+			output = append(output, fmt.Sprintf("mr-%v-%v", i, j))
+		}
+
 		task := Task{
 			Handle: i,
 			R:      nReduce,
 			Type:   TaskTypeMap,
-			Input:  file,
-			Output: "",
+			Input:  []string{file},
+			Output: output,
 			Status: TaskStatusReady,
 			Worker: "",
 		}

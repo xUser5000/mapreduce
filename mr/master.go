@@ -5,62 +5,44 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"time"
+	"net/http"
+	"net/rpc"
+	"os"
+	"slices"
+	"sync"
 )
-import "os"
-import "net/rpc"
-import "net/http"
 
 type Master struct {
 	MapTasks    []Task
 	ReduceTasks []Task
-	Phase       TaskType
+	Phase       Phase
 	R           int
 	M           int
-	TaskCounter int
+	Queue       chan *Task
+	Mutex       sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
 
 func (m *Master) GetTask(args *GetTaskArgs, reply *Task) error {
-	var selectedTask *Task
+	m.Mutex.Lock()
+	defer m.Mutex.Unlock()
 
-	if m.Phase == TaskTypeMap {
-		for i := 0; i < len(m.MapTasks); i++ {
-			if m.MapTasks[i].Status == TaskStatusReady {
-				selectedTask = &m.MapTasks[i]
-				break
-			}
-		}
-
-		if selectedTask == nil {
-			for m.Phase == TaskTypeMap {
-				time.Sleep(time.Second)
-			}
-		}
+	if m.doneWithoutLocks() || len(m.Queue) == 0 {
+		return errors.New("master: there are no available tasks")
 	}
 
-	if selectedTask == nil {
-		for i := 0; i < len(m.ReduceTasks); i++ {
-			if m.ReduceTasks[i].Status == TaskStatusReady {
-				selectedTask = &m.ReduceTasks[i]
-				break
-			}
-		}
-	}
-
-	if selectedTask == nil {
-		return errors.New("master: there are no available tasks\n")
-	}
-
+	selectedTask := <-m.Queue
 	selectedTask.Worker = args.Worker
 	selectedTask.Status = TaskStatusInProgress
-
 	*reply = *selectedTask
 	return nil
 }
 
 func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
+	m.Mutex.Lock()
+	defer m.Mutex.Unlock()
+
 	var task *Task
 	if args.Type == TaskTypeMap {
 		task = &m.MapTasks[args.Handle]
@@ -70,14 +52,10 @@ func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
 	task.Status = TaskStatusFinished
 	task.Worker = ""
 
-	finishedMaps := 0
-	for _, task := range m.MapTasks {
-		if task.Status == TaskStatusFinished {
-			finishedMaps++
-		}
-	}
-
-	if m.Phase == TaskTypeMap && finishedMaps == len(m.MapTasks) {
+	finishedMap := !slices.ContainsFunc(m.MapTasks, func(task Task) bool {
+		return task.Status != TaskStatusFinished
+	})
+	if m.Phase == PhaseMap && finishedMap {
 		for i := range m.R {
 			input := make([]string, 0)
 			for j := range m.M {
@@ -88,6 +66,7 @@ func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
 
 			reduceTask := Task{
 				Handle: i,
+				M:      m.M,
 				R:      m.R,
 				Type:   TaskTypeReduce,
 				Input:  input,
@@ -96,8 +75,16 @@ func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
 				Worker: "",
 			}
 			m.ReduceTasks = append(m.ReduceTasks, reduceTask)
+			m.Queue <- &reduceTask
 		}
-		m.Phase = TaskTypeReduce
+		m.Phase = PhaseReduce
+	}
+
+	finishedReduce := !slices.ContainsFunc(m.ReduceTasks, func(task Task) bool {
+		return task.Status != TaskStatusFinished
+	})
+	if m.Phase == PhaseReduce && finishedReduce {
+		m.Phase = PhaseFinished
 	}
 
 	return nil
@@ -121,15 +108,13 @@ func (m *Master) server() {
 // main/mrmaster.go calls Done() periodically to find out
 // if the entire job has finished.
 func (m *Master) Done() bool {
-	if m.Phase == TaskTypeReduce {
-		for _, task := range m.ReduceTasks {
-			if task.Status != TaskStatusFinished {
-				return false
-			}
-		}
-		return true
-	}
-	return false
+	m.Mutex.Lock()
+	defer m.Mutex.Unlock()
+	return m.doneWithoutLocks()
+}
+
+func (m *Master) doneWithoutLocks() bool {
+	return m.Phase == PhaseFinished
 }
 
 // MakeMaster
@@ -138,12 +123,12 @@ func (m *Master) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{
-		Phase:       TaskTypeMap,
+		Phase:       PhaseMap,
 		MapTasks:    make([]Task, 0),
 		ReduceTasks: make([]Task, 0),
 		R:           nReduce,
 		M:           len(files),
-		TaskCounter: 0,
+		Queue:       make(chan *Task, nReduce+len(files)),
 	}
 
 	for i, file := range files {
@@ -154,7 +139,8 @@ func MakeMaster(files []string, nReduce int) *Master {
 
 		task := Task{
 			Handle: i,
-			R:      nReduce,
+			M:      m.M,
+			R:      m.R,
 			Type:   TaskTypeMap,
 			Input:  []string{file},
 			Output: output,
@@ -162,6 +148,7 @@ func MakeMaster(files []string, nReduce int) *Master {
 			Worker: "",
 		}
 		m.MapTasks = append(m.MapTasks, task)
+		m.Queue <- &task
 	}
 
 	m.server()

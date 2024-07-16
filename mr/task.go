@@ -50,3 +50,21 @@ var taskStatusName = map[TaskStatus]string{
 func (taskStatus TaskStatus) String() string {
 	return taskStatusName[taskStatus]
 }
+
+type Phase int
+
+const (
+	PhaseMap Phase = iota
+	PhaseReduce
+	PhaseFinished
+)
+
+var phaseName = map[Phase]string{
+	PhaseMap:      "map",
+	PhaseReduce:   "reduce",
+	PhaseFinished: "finished",
+}
+
+func (phase Phase) String() string {
+	return phaseName[phase]
+}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"time"
 )
 import "log"
 import "net/rpc"
@@ -44,8 +45,8 @@ func Worker(mapf func(string, string) []KeyValue,
 	for {
 		task, err := getTask()
 		if err != nil {
-			fmt.Printf("Worker %v: exit due to unreachable master\n", os.Getpid())
-			os.Exit(0)
+			time.Sleep(time.Second)
+			continue
 		}
 
 		fmt.Printf("Worker %v: executing %v\n", os.Getpid(), task)

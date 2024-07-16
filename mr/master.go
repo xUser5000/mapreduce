@@ -10,14 +10,15 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"time"
 )
 
 type Master struct {
-	MapTasks    []Task
-	ReduceTasks []Task
 	Phase       Phase
 	R           int
 	M           int
+	MapTasks    []Task
+	ReduceTasks []Task
 	Queue       chan *Task
 	Mutex       sync.Mutex
 }
@@ -35,6 +36,21 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *Task) error {
 	selectedTask := <-m.Queue
 	selectedTask.Worker = args.Worker
 	selectedTask.Status = TaskStatusInProgress
+
+	// wait ten seconds for the worker to complete its task
+	// if it didn't, simply make the task available again
+	// so that it can be picked up by other workers
+	selectedTask.timer = time.NewTimer(10 * time.Second)
+	go func() {
+		<-selectedTask.timer.C
+		m.Mutex.Lock()
+		defer m.Mutex.Unlock()
+		selectedTask.Worker = ""
+		selectedTask.Status = TaskStatusReady
+		selectedTask.timer = nil
+		m.Queue <- selectedTask
+	}()
+
 	*reply = *selectedTask
 	return nil
 }
@@ -51,6 +67,9 @@ func (m *Master) Finish(args FinishArgs, reply *FinishReply) error {
 	}
 	task.Status = TaskStatusFinished
 	task.Worker = ""
+	if task.timer != nil {
+		task.timer.Stop()
+	}
 
 	finishedMap := !slices.ContainsFunc(m.MapTasks, func(task Task) bool {
 		return task.Status != TaskStatusFinished

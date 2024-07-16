@@ -1,6 +1,9 @@
 package mr
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Task struct {
 	Handle int
@@ -11,6 +14,7 @@ type Task struct {
 	Output []string
 	Status TaskStatus
 	Worker string
+	timer  *time.Timer
 }
 
 func (task *Task) String() string {

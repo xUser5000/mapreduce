@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -76,16 +77,21 @@ func mapper(mapf func(string, string) []KeyValue, task *Task) {
 	// run the user-defined map function
 	kva := mapf(input.Name(), string(content))
 
-	// open R reduce files
-	encoders := make([]*json.Encoder, 0)
-	for _, file := range task.Output {
-		output, err := os.Create(file)
-		if err != nil {
-			log.Fatalf("mapper: %v", err)
-		}
-		defer output.Close()
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("mapper: %v", err)
+	}
 
-		encoders = append(encoders, json.NewEncoder(output))
+	// open R temp reduce files
+	encoders := make([]*json.Encoder, 0)
+	tempfiles := make([]*os.File, len(task.Output))
+	for i := range task.Output {
+		tempfiles[i], err = os.CreateTemp(wd, "temp-*")
+		if err != nil {
+			log.Fatalf("mapper %v: %v", task, err)
+		}
+
+		encoders = append(encoders, json.NewEncoder(tempfiles[i]))
 	}
 
 	// partition the keys into R files
@@ -95,6 +101,16 @@ func mapper(mapf func(string, string) []KeyValue, task *Task) {
 		if err != nil {
 			log.Fatalf("mapper: %v", err)
 		}
+	}
+
+	// close the temp files and rename them
+	for i, file := range tempfiles {
+		err = os.Rename(file.Name(), filepath.Join(wd, task.Output[i]))
+		if err != nil {
+			log.Fatalf("mapper: %v", err)
+		}
+
+		file.Close()
 	}
 
 	if err := finish(task); err != nil {
@@ -124,11 +140,15 @@ func reducer(reducef func(string, []string) string, task *Task) {
 
 	sort.Sort(ByKey(intermediate))
 
-	ofile, err := os.Create(task.Output[0])
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("mapper: %v", err)
+	}
+
+	ofile, err := os.CreateTemp(wd, "temp-*")
 	if err != nil {
 		log.Fatalf("reducer: %v\n", err)
 	}
-	defer ofile.Close()
 
 	l := 0
 	for l < len(intermediate) {
@@ -152,8 +172,15 @@ func reducer(reducef func(string, []string) string, task *Task) {
 		l = r
 	}
 
-	if err := finish(task); err != nil {
-		log.Fatalf("mapper: %v", err)
+	ofile.Close()
+
+	err = os.Rename(ofile.Name(), filepath.Join(wd, task.Output[0]))
+	if err != nil {
+		log.Fatalf("reducer: %v", err)
+	}
+
+	if err = finish(task); err != nil {
+		log.Fatalf("reducer: %v", err)
 	}
 }
 

@@ -6,7 +6,7 @@
 [Dean and Ghemawat, 2004, MapReduce: Simplified Data Processing on Large Clusters](https://research.google.com/archive/mapreduce-osdi04.pdf)
 
 # What is this repository?
-This repository contains an implementation of a MapReduce library that can be used to parallelize computing tasks over multiple OS processes, in contrast to the actual MapReduce system that runs on a large cluster of machines. The library was coded as part of [Lab 1](http://nil.csail.mit.edu/6.824/2020/labs/lab-mr.html) in MIT's [6.824: Distributed Systems](http://nil.csail.mit.edu/6.824/2020/).
+This repository contains an implementation of a MapReduce library that can be used to parallelize computing tasks over multiple OS processes, in contrast to the actual MapReduce system that runs on a large cluster of machines. The library was coded as part of [Lab 1](http://nil.csail.mit.edu/6.824/2020/labs/lab-mr.html) in MIT's [6.824: Distributed Systems](http://nil.csail.mit.edu/6.824/2020/). It is parrallel, fault-tolerant (in case of worker crashes), and uses RPC for master-worker communication.
 
 # How do I run the code?
 A prerequisite is to have Golang installed and available.
